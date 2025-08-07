@@ -1,90 +1,160 @@
+// App.js
 import React, { useState, useEffect } from 'react';
-import './App.css';
+import axios from 'axios';
+import { authAPI } from './services/api';
 import AuthPage from './pages/AuthPage';
+import DashboardPage from './pages/DashboardPage';
 import ChatPage from './pages/ChatPage';
 import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
 import RoomsPage from './pages/RoomsPage';
-import axios from 'axios';
+import './App.css';
+
+// Axios interceptor for handling token expiration
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.reload();
+    }
+    return Promise.reject(error);
+  }
+);
 
 function App() {
   const [user, setUser] = useState(null);
+  const [currentPage, setCurrentPage] = useState('dashboard');
   const [darkMode, setDarkMode] = useState(true);
-  const [currentPage, setCurrentPage] = useState('auth');
+  const [loading, setLoading] = useState(true);
 
-  // Check for existing token on mount
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      axios
-        .get('http://localhost:3001/users/profile', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        .then((response) => {
-          setUser(response.data);
-          setCurrentPage('chat');
-        })
-        .catch(() => {
-          localStorage.removeItem('token');
-          setCurrentPage('auth');
-        });
+  const validateToken = async (token) => {
+    try {
+      const response = await authAPI.validateToken(token);
+      return response.user;
+    } catch (error) {
+      console.error('Token validation failed:', error);
+      return null;
     }
+  };
+
+  useEffect(() => {
+    const initializeAuth = async () => {
+      const token = localStorage.getItem('token');
+      const savedUser = localStorage.getItem('user');
+      
+      if (token && savedUser) {
+        try {
+          // Parse saved user data
+          const userData = JSON.parse(savedUser);
+          
+          // Check token expiration
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          if (payload.exp * 1000 < Date.now()) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setUser(null);
+          } else {
+            // Validate token with backend
+            const validatedUser = await validateToken(token);
+            if (validatedUser) {
+              setUser(validatedUser);
+            } else {
+              localStorage.removeItem('token');
+              localStorage.removeItem('user');
+              setUser(null);
+            }
+          }
+        } catch (error) {
+          console.error('Auth initialization error:', error);
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+        }
+      }
+      setLoading(false);
+    };
+
+    initializeAuth();
   }, []);
 
-  const navigateToChat = () => setCurrentPage('chat');
-  const navigateToAuth = () => {
-    setCurrentPage('auth');
-    setUser(null);
-    localStorage.removeItem('token');
+  const handleLogin = (userData, token) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
+    setCurrentPage('dashboard');
   };
-  const navigateToProfile = () => setCurrentPage('profile');
-  const navigateToSettings = () => setCurrentPage('settings');
-  const navigateToRooms = () => setCurrentPage('rooms');
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setCurrentPage('dashboard');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="relative">
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-purple-500 border-t-transparent"></div>
+          <div className="absolute inset-0 rounded-full h-16 w-16 border-4 border-pink-500 border-t-transparent animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className={`min-h-screen ${darkMode ? 'dark' : ''}`}>
+        <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
+          <AuthPage onLogin={handleLogin} darkMode={darkMode} setDarkMode={setDarkMode} />
+        </div>
+      </div>
+    );
+  }
+
+  const renderCurrentPage = () => {
+    const commonProps = {
+      user,
+      setUser,
+      darkMode,
+      setDarkMode,
+      onLogout: handleLogout,
+      onNavigateToProfile: () => setCurrentPage('profile'),
+      onNavigateToSettings: () => setCurrentPage('settings'),
+      onNavigateToRooms: () => setCurrentPage('rooms'),
+      onNavigateToChat: () => setCurrentPage('chat'),
+      onNavigateToDashboard: () => setCurrentPage('dashboard'),
+      onBack: () => setCurrentPage('dashboard'),
+    };
+
+    switch (currentPage) {
+      case 'chat':
+        return <ChatPage {...commonProps} />;
+      case 'profile':
+        return <ProfilePage {...commonProps} />;
+      case 'settings':
+        return <SettingsPage {...commonProps} />;
+      case 'rooms':
+        return <RoomsPage {...commonProps} onSelectRoom={() => setCurrentPage('chat')} />;
+      case 'dashboard':
+      default:
+        return <DashboardPage {...commonProps} />;
+    }
+  };
 
   return (
-    <div className={darkMode ? 'dark' : ''}>
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 dark:from-gray-900 dark:via-purple-900 dark:to-gray-900 relative overflow-hidden">
-        {/* Animated Background Elements */}
+    <div className={`min-h-screen ${darkMode ? 'dark' : ''}`}>
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 relative overflow-hidden">
+        {/* Animated background elements */}
         <div className="absolute inset-0">
-          <div className="absolute top-20 left-20 w-72 h-72 bg-purple-500/20 rounded-full blur-3xl animate-pulse"></div>
-          <div className="absolute bottom-20 right-20 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-pink-500/20 rounded-full blur-3xl animate-pulse delay-500"></div>
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-500/20 rounded-full mix-blend-multiply filter blur-xl animate-pulse"></div>
+          <div className="absolute top-3/4 right-1/4 w-96 h-96 bg-pink-500/20 rounded-full mix-blend-multiply filter blur-xl animate-pulse" style={{ animationDelay: '2s' }}></div>
+          <div className="absolute bottom-1/4 left-1/2 w-96 h-96 bg-blue-500/20 rounded-full mix-blend-multiply filter blur-xl animate-pulse" style={{ animationDelay: '4s' }}></div>
         </div>
-
-        {currentPage === 'auth' && (
-          <AuthPage setUser={setUser} darkMode={darkMode} setDarkMode={setDarkMode} onLogin={navigateToChat} />
-        )}
-        {currentPage === 'chat' && (
-          <ChatPage
-            user={user}
-            darkMode={darkMode}
-            setDarkMode={setDarkMode}
-            onLogout={navigateToAuth}
-            onNavigateToProfile={navigateToProfile}
-            onNavigateToSettings={navigateToSettings}
-            onNavigateToRooms={navigateToRooms}
-          />
-        )}
-        {currentPage === 'profile' && (
-          <ProfilePage
-            user={user}
-            darkMode={darkMode}
-            setDarkMode={setDarkMode}
-            onBack={navigateToChat}
-            setUser={setUser}
-          />
-        )}
-        {currentPage === 'settings' && (
-          <SettingsPage darkMode={darkMode} setDarkMode={setDarkMode} onBack={navigateToChat} />
-        )}
-        {currentPage === 'rooms' && (
-          <RoomsPage
-            darkMode={darkMode}
-            setDarkMode={setDarkMode}
-            onBack={navigateToChat}
-            onSelectRoom={navigateToChat}
-          />
-        )}
+        
+        {renderCurrentPage()}
       </div>
     </div>
   );
